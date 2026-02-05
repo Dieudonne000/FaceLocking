@@ -10,7 +10,7 @@ def main():
     if not cap.isOpened():
         raise RuntimeError("Camera not opened. Try camera index 0/1/2.")
     
-    print("Haar face detect (minimal). q: exit.")
+    print("Haar face detect (minimal). Press 'q' to quit.")
     
     while True:
         ok, frame = cap.read()
@@ -28,7 +28,7 @@ def main():
         )
         
         for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 0), 2)  # cyan
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
         
         cv2.imshow("Face Detection", frame)
         if (cv2.waitKey(1) & 0xFF) == ord("q"):

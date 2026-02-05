@@ -49,7 +49,7 @@ def main():
     if not cap.isOpened():
         raise RuntimeError("Camera not opened. Try camera index 0/1/2.")
     
-    print("Haar + FaceMesh 5pt (Tasks API). q: exit.")
+    print("Haar + FaceMesh 5pt (Tasks API). Press 'q' to quit.")
     
     while True:
         ok, frame = cap.read()
@@ -62,7 +62,7 @@ def main():
         
         # draw ALL haar faces (no ranking)
         for (x, y, w, h) in faces:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 0), 2)  # cyan
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
         
         # FaceMesh on full frame (Tasks API)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -90,9 +90,9 @@ def main():
             
             # draw 5 points
             for (px, py) in kps.astype(int):
-                cv2.circle(frame, (int(px), int(py)), 4, (255, 255, 0), -1)  # cyan
+                cv2.circle(frame, (int(px), int(py)), 4, (0, 255, 0), -1)
             
-            cv2.putText(frame, "5pt", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2)
+            cv2.putText(frame, "5pt", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
         
         cv2.imshow("5pt Landmarks", frame)
         if (cv2.waitKey(1) & 0xFF) == ord("q"):

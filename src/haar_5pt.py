@@ -315,7 +315,7 @@ def main():
         smooth_alpha=0.80,
         debug=True,
     )
-    print("Haar + 5pt (FaceMesh Tasks API) test. q: exit.")
+    print("Haar + 5pt (FaceMesh Tasks API) test. Press q to quit.")
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -324,16 +324,16 @@ def main():
         vis = frame.copy()
         if faces:
             f = faces[0]
-            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (255, 255, 0), 2)  # cyan
-                for (x, y) in f.kps.astype(int):
-                    cv2.circle(vis, (int(x), int(y)), 3, (255, 255, 0), -1)
+            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
+            for (x, y) in f.kps.astype(int):
+                cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
             cv2.putText(
                 vis,
                 f"OK",
                 (f.x1, max(0, f.y1 - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
-                (255, 255, 0),  # cyan
+                (0, 255, 0),
                 2,
             )
         else:

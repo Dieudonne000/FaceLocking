@@ -11,7 +11,7 @@ Run:
     python -m src.align
 
 Keys:
-    q exit
+    q quit
     s save current aligned face to data/debug_aligned/<timestamp>.jpg
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ def main(
     fps_t0 = time.time()
     fps_n = 0
     fps = 0.0
-    print("align running. q: exit, s: save aligned face.")
+    print("align running. Press 'q' to quit, 's' to save aligned face.")
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -67,9 +67,9 @@ def main(
         if faces:
             f = faces[0]
             # Draw box + 5 pts
-            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (255, 255, 0), 2)  # cyan
+            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
             for (x, y) in f.kps.astype(int):
-                cv2.circle(vis, (int(x), int(y)), 3, (255, 255, 0), -1)
+                cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
 
             # Align (this is the whole point)
             aligned, _M = align_face_5pt(frame, f.kps, out_size=out_size)

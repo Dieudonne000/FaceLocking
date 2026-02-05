@@ -29,17 +29,16 @@ A real-time face recognition system with face locking capabilities, designed to 
 
 ## Usage
 
-### 1. Registration (Enrollment)
-Register new identities by snapping face samples from the camera.
+### 1. Enrollment
+Enroll new identities by capturing face samples from the camera.
 ```bash
 python -m src.enroll
 ```
 - **Controls**:
-  - `SPACE`: Snap a single sample.
-  - `a`: Toggle auto-snap.
+  - `SPACE`: Capture a single sample.
+  - `a`: Toggle auto-capture.
   - `s`: Save enrollment to database.
-  - `r`: Clear new samples (existing kept).
-  - `q`: Exit.
+  - `q`: Quit.
 
 ### 2. Recognition
 Run real-time multi-face recognition with face locking and action tracking.
@@ -48,16 +47,19 @@ python -m src.recognize
 ```
 - **Controls**:
   - `+/-`: Adjust distance threshold live.
-  - `r`: Refresh database from disk.
+  - `r`: Reload database from disk.
   - `d`: Toggle debug overlay.
   - `l`: Lock/unlock the currently recognized face.
-  - `q`: Exit.
+  - `q`: Quit.
 
 #### Face Locking Features
-- Lock onto a specific person by pressing `l` when their face is detected (`l: lock onto [name]`).
-- The system tracks the locked face and logs their actions.
-- Actions include: head movements (left/right), smile detection, face lock/unlock events.
-- All actions are timestamped and saved to `logs/[Name]_history_[timestamp].txt`.
+- Lock onto a specific person by pressing `l` when their face is detected
+- The system will track the locked face and log their actions
+- Actions include:
+  - Head movements (left/right)
+  - Smile detection
+  - Face locking/unlocking events
+- All actions are timestamped and saved to `logs/[Name]_history_[timestamp].txt`
 
 ### 3. Evaluation
 Evaluate the model's performance on enrolled crops and find the optimal threshold.
@@ -68,17 +70,17 @@ python -m src.evaluate
 ### 4. Demos
 Visualize embeddings or detection/landmarks:
 ```bash
-python -m src.embed     # Embedding heatmap visualization (q: exit, p: print stats)
-python -m src.haar_5pt  # Detection and landmark visualization (q: exit)
+python -m src.embed    # Embedding heatmap visualization
+python -m src.haar_5pt  # Detection and landmark visualization
 ```
 
 ## Face Locking System
 
 ### How Face Locking Works
 1. **Activation**: 
-   - Press `l` when a recognized face is on screen.
-   - The system locks onto the closest recognized face.
-   - A visual indicator (magenta border) shows the locked face; cyan for recognized, red for unknown.
+   - Press 'l' when a recognized face is on screen
+   - The system will lock onto the closest recognized face
+   - A visual indicator (orange border) shows the locked face
 
 2. **Tracking**:
    - The system continues to track the locked face even if other faces appear
@@ -110,7 +112,6 @@ python -m src.haar_5pt  # Detection and landmark visualization (q: exit)
   2026-01-31 13:20:20.225528 - HEAD_RIGHT: Moved right by 31.9px
   2026-01-31 13:20:21.684933 - SMILE: Smile detected (ratio: 14.97)
   ```
-- **UI colors**: Recognized faces use a **cyan** border; locked face uses **magenta**; unknown uses **red**.
 - **Log Management**:
   - New log file created for each recognition session
   - Timestamp in filename helps track different usage sessions

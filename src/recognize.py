@@ -6,8 +6,8 @@ Haar (multi-face) -> FaceMesh 5pt (per-face ROI) -> align_face_5pt (112x112)
 Run:
 python -m src.recognize
 Keys:
-q : exit
-r : refresh DB from disk (data/db/face_db.npz)
+q : quit
+r : reload DB from disk (data/db/face_db.npz)
 +/- : adjust threshold (distance) live
 d : toggle debug overlay
 Notes:
@@ -463,7 +463,7 @@ def main():
         det.close()
         return
     
-    print("Recognize (multi-face). q=exit, r=refresh DB, +/- threshold, d=debug overlay, l=lock/unlock face")
+    print("Recognize (multi-face). q=quit, r=reload DB, +/- threshold, d=debug overlay, l=lock/unlock face")
     t0 = time.time()
     frames = 0
     fps: Optional[float] = None
@@ -508,9 +508,9 @@ def main():
                 face_lock = None
             
             for i, f in enumerate(faces):
-                cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (255, 255, 0), 2)  # cyan
+                cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
                 for (x, y) in f.kps.astype(int):
-                    cv2.circle(vis, (int(x), int(y)), 2, (255, 255, 0), -1)
+                    cv2.circle(vis, (int(x), int(y)), 2, (0, 255, 0), -1)
                 
                 # align -> embed -> match
                 aligned, _ = align_face_5pt(frame, f.kps, out_size=(112, 112))
@@ -533,12 +533,12 @@ def main():
                 line1 = f"{label}{status}"
                 line2 = f"dist={mr.distance:.3f} sim={mr.similarity:.3f}"
                 
-                # color: locked=magenta, known=cyan, unknown=red
+                # color: locked=blue, known=green, unknown=red
                 if is_locked_face:
-                    color = (255, 0, 255)  # Magenta for locked face
+                    color = (255, 165, 0)  # Orange for locked face
                     cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), color, 3)
                 else:
-                    color = (255, 255, 0) if mr.accepted else (0, 0, 255)  # cyan / red
+                    color = (0, 255, 0) if mr.accepted else (0, 0, 255)
                 
                 cv2.putText(vis, line1, (f.x1, max(0, f.y1 - 28)), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
                 cv2.putText(vis, line2, (f.x1, max(0, f.y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
@@ -548,11 +548,11 @@ def main():
                     lock_target = mr.name  # Update lock target to recognized name
                     potential_face_to_lock = (mr.name, emb, f.kps)
                     # Show lock hint with the person's name
-                    hint_text = f"l: lock onto {mr.name}"
+                    hint_text = f"Press 'l' to lock {mr.name}"
                     text_size = cv2.getTextSize(hint_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)[0]
                     cv2.putText(vis, hint_text, 
                                (f.x1, f.y1 - 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1, cv2.LINE_AA)
                 
                 # aligned preview thumbnails (stack)
                 if y0 + thumb <= h and shown < 4:
@@ -580,33 +580,33 @@ def main():
             header = f"IDs: {len(matcher._names)} | Threshold: {matcher.dist_thresh:.2f}"
             if fps is not None:
                 header += f" | FPS: {fps:.1f}"
-            cv2.putText(vis, header, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)  # cyan
+            cv2.putText(vis, header, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             y_offset += 30
             
             # Lock status
             if face_lock:
                 status_text = f"LOCKED ON: {face_lock.target_name} (Frames: {face_lock.consecutive_frames})"
-                cv2.putText(vis, status_text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)  # magenta
+                cv2.putText(vis, status_text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                 y_offset += 30
                 
                 # Last action
                 if face_lock.history and len(face_lock.history) > 0:
                     last_action = face_lock.history[-1]
-                    action_text = f"Last: {last_action.type.name} - {last_action.details}"
+                    action_text = f"Last Action: {last_action.type.name} - {last_action.details}"
                     cv2.putText(vis, action_text, (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
             else:
-                status_text = f"l: lock onto recognized face"
-                cv2.putText(vis, status_text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)  # cyan
+                status_text = f"Press 'l' to lock the recognized face"
+                cv2.putText(vis, status_text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 y_offset += 30
             
             # Handle key presses
             key = cv2.waitKey(1) & 0xFF
             
-            if key == ord("q"):  # Exit
+            if key == ord("q"):  # Quit
                 break
-            elif key == ord("r"):  # Refresh DB
+            elif key == ord("r"):  # Reload DB
                 matcher.reload_from(db_path)
-                print(f"[recognize] refreshed DB: {len(matcher._names)} identities")
+                print(f"[recognize] reloaded DB: {len(matcher._names)} identities")
             elif key in (ord("+"), ord("=")):  # Increase threshold
                 matcher.dist_thresh = float(min(1.20, matcher.dist_thresh + 0.01))
                 print(f"[recognize] thr(dist)={matcher.dist_thresh:.2f} (sim~{1.0-matcher.dist_thresh:.2f})")
@@ -642,7 +642,7 @@ def main():
                     # Clear the potential face after locking
                     del potential_face_to_lock
             
-            cv2.imshow("Face Recognition — q: exit", vis)
+            cv2.imshow("Face Recognition - Press 'q' to quit", vis)
     finally:
         det.close()
         cap.release()

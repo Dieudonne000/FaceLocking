@@ -13,11 +13,11 @@ Outputs:
 Optional:
 - data/enroll/<name>/*.jpg aligned face crops
 Controls:
-- SPACE: snap one sample (if face found)
-- a: auto-snap toggle (snaps periodically)
+- SPACE: capture one sample (if face found)
+- a: auto-capture toggle (captures periodically)
 - s: save enrollment (after enough total samples)
-- r: clear new samples (keeps existing crops on disk)
-- q: exit
+- r: reset NEW samples (keeps existing crops on disk)
+- q: quit
 """
 from __future__ import annotations
 import json
@@ -44,8 +44,8 @@ class EnrollConfig:
     auto_capture_every_s: float = 0.25
     max_existing_crops: int = 300
     # UI
-    window_main: str = "Register Face"
-    window_aligned: str = "Aligned crop"
+    window_main: str = "enroll"
+    window_aligned: str = "aligned_112"
 
 # -------------------------
 # DB helpers
@@ -126,10 +126,10 @@ def draw_status(
 ) -> None:
     total = base_count + new_count
     lines = [
-        f"REGISTER: {name}",
+        f"ENROLL: {name}",
         f"Existing: {base_count} | New: {new_count} | Total: {total} / {needed}",
-        f"Auto-snap: {'ON' if auto else 'OFF'} (toggle: a)",
-        "SPACE=snap | s=save | r=clear new | q=exit",
+        f"Auto: {'ON' if auto else 'OFF'} (toggle: a)",
+        "SPACE=capture | s=save | r=reset NEW | q=quit",
     ]
     if msg:
         lines.insert(0, msg)
@@ -146,7 +146,7 @@ def draw_status(
 def main():
     cfg = EnrollConfig()
     ensure_dirs(cfg)
-    name = input("Enter identity name (e.g., Alice): ").strip()
+    name = input("Enter person name to enroll (e.g., Alice): ").strip()
     if not name:
         print("No name provided. Exiting.")
         return
@@ -175,11 +175,11 @@ def main():
     cv2.namedWindow(cfg.window_aligned, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(cfg.window_aligned, 240, 240)
     
-    print("\nRegistration started.")
+    print("\nEnrollment started.")
     if base_samples:
-        print(f"Re-register mode: found {len(base_samples)} existing samples in {person_dir}/")
+        print(f"Re-enroll mode: found {len(base_samples)} existing samples in {person_dir}/")
     print("Tip: stable lighting, move slightly left/right, different expressions.")
-    print("Controls: SPACE=snap, a=auto-snap, s=save, r=clear new, q=exit\n")
+    print("Controls: SPACE=capture, a=auto, s=save, r=reset NEW, q=quit\n")
     
     t0 = time.time()
     frames = 0
@@ -198,9 +198,9 @@ def main():
             if faces:
                 f = faces[0]
                 # draw bbox + kps
-                cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (255, 255, 0), 2)  # cyan
+                cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
                 for (x, y) in f.kps.astype(int):
-                    cv2.circle(vis, (int(x), int(y)), 3, (255, 255, 0), -1)
+                    cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
                 aligned, _ = align_face_5pt(frame, f.kps, out_size=(112, 112))
                 cv2.imshow(cfg.window_aligned, aligned)
             else:
@@ -212,7 +212,7 @@ def main():
                 r = emb.embed(aligned)
                 new_samples.append(r.embedding)
                 last_auto = now
-                status_msg = f"Auto snapped NEW ({len(new_samples)})"
+                status_msg = f"Auto captured NEW ({len(new_samples)})"
                 if cfg.save_crops:
                     fn = person_dir / f"{int(now * 1000)}.jpg"
                     cv2.imwrite(str(fn), aligned)
@@ -227,7 +227,7 @@ def main():
             
             if fps is not None:
                 cv2.putText(vis, f"FPS: {fps:.1f}", (10, vis.shape[0] - 12),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)  # cyan
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
             
             draw_status(
                 vis,
@@ -246,17 +246,17 @@ def main():
                 break
             if key == ord("a"):
                 auto = not auto
-                status_msg = f"Auto-snap {'ON' if auto else 'OFF'}"
+                status_msg = f"Auto mode {'ON' if auto else 'OFF'}"
             if key == ord("r"):
                 new_samples.clear()
-                status_msg = "New samples cleared (existing kept)"
+                status_msg = "NEW samples reset (existing kept)"
             if key == ord(" "): # SPACE
                 if aligned is None:
-                    status_msg = "No face detected. Not snapped."
+                    status_msg = "No face detected. Not captured."
                 else:
                     r = emb.embed(aligned)
                     new_samples.append(r.embedding)
-                    status_msg = f"Snapped NEW ({len(new_samples)})"
+                    status_msg = f"Captured NEW ({len(new_samples)})"
                     if cfg.save_crops:
                         fn = person_dir / f"{int(time.time() * 1000)}.jpg"
                         cv2.imwrite(str(fn), aligned)

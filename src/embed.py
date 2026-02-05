@@ -10,7 +10,7 @@ camera
 Run:
 python -m src.embed
 Keys:
-q : exit
+q : quit
 p : print embedding stats to terminal
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ class ArcFaceEmbedderONNX:
 # -------------------------
 # Visualization helpers
 # -------------------------
-def draw_text_block(img, lines, origin=(10, 30), scale=0.7, color=(255, 255, 0)):
+def draw_text_block(img, lines, origin=(10, 30), scale=0.7, color=(0, 255, 0)):
     x, y = origin
     for line in lines:
         cv2.putText(img, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2)
@@ -140,7 +140,7 @@ def main():
         debug=False,
     )
     prev_emb: Optional[np.ndarray] = None
-    print("Embedding Demo running. q: exit, p: print embedding.")
+    print("Embedding Demo running. Press 'q' to quit, 'p' to print embedding.")
     t0 = time.time()
     frames = 0
     fps = 0.0
@@ -154,9 +154,9 @@ def main():
         if faces:
             f = faces[0]
             # draw detection
-            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (255, 255, 0), 2)  # cyan
-                for (x, y) in f.kps.astype(int):
-                    cv2.circle(vis, (x, y), 3, (255, 255, 0), -1)
+            cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
+            for (x, y) in f.kps.astype(int):
+                cv2.circle(vis, (x, y), 3, (0, 255, 0), -1)
             # align + embed
             aligned, _ = align_face_5pt(frame, f.kps, out_size=(112, 112))
             res = emb_model.embed(aligned)
@@ -201,7 +201,7 @@ def main():
             frames = 0
             t0 = time.time()
         cv2.putText(vis, f"fps: {fps:.1f}", (10, vis.shape[0] - 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)  # cyan
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.imshow("Face Embedding", vis)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
