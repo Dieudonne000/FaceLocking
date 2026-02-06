@@ -40,6 +40,7 @@ except Exception as e:
 
 # Reuse your known-good alignment method
 from .haar_5pt import align_face_5pt
+from .onnx_providers import select_provider_interactive, get_provider_display_name
 
 # -------------------------
 # Data
@@ -209,7 +210,7 @@ def load_db_npz(db_path: Path) -> Dict[str, np.ndarray]:
 class ArcFaceEmbedderONNX:
     """
     ArcFace-style ONNX embedder.
-    Input: 112x112 BGR -> internally RGB + (x-127.5)/128, NCHW float32.
+    Input: 112x112 BGR -> internally RGB + (x-127.5)/128, NHWC float32.
     Output: (1,D) or (D,)
     """
     def __init__(
@@ -217,15 +218,19 @@ class ArcFaceEmbedderONNX:
         model_path: str = "models/embedder_arcface.onnx",
         input_size: Tuple[int, int] = (112, 112),
         debug: bool = False,
+        providers: Optional[List[str]] = None,
     ):
         self.model_path = model_path
         self.in_w, self.in_h = int(input_size[0]), int(input_size[1])
         self.debug = bool(debug)
-        self.sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        if providers is None:
+            providers = ["CPUExecutionProvider"]
+        self.sess = ort.InferenceSession(model_path, providers=providers)
         self.in_name = self.sess.get_inputs()[0].name
         self.out_name = self.sess.get_outputs()[0].name
         if self.debug:
             print("[embed] model:", model_path)
+            print("[embed] providers:", self.sess.get_providers())
             print("[embed] input:", self.sess.get_inputs()[0].name, self.sess.get_inputs()[0].shape, self.sess.get_inputs()[0].type)
             print("[embed] output:", self.sess.get_outputs()[0].name, self.sess.get_outputs()[0].shape, self.sess.get_outputs()[0].type)
 
@@ -389,7 +394,16 @@ class HaarFaceMesh5pt:
 # Matcher
 # -------------------------
 class FaceDBMatcher:
-    def __init__(self, db: Dict[str, np.ndarray], dist_thresh: float = 0.34):
+    def __init__(self, db: Dict[str, np.ndarray], dist_thresh: float = 0.40):
+        """
+        Face database matcher with cosine similarity.
+        
+        Args:
+            db: Dictionary mapping names to embedding vectors
+            dist_thresh: Cosine distance threshold (default 0.40 for better recall).
+                        Lower = stricter (fewer false positives, more false negatives).
+                        Higher = more lenient (more false positives, fewer false negatives).
+        """
         self.db = db
         self.dist_thresh = float(dist_thresh)
         # pre-stack for speed
@@ -445,6 +459,18 @@ def main():
     db_path = Path("data/db/face_db.npz")
     os.makedirs("logs", exist_ok=True)
     
+    # Select execution provider (CPU/GPU)
+    providers = select_provider_interactive()
+    provider_name = get_provider_display_name(providers)
+    print(f"\nUsing: {provider_name}")
+    
+    # Note about CUDA warnings
+    if "CUDAExecutionProvider" in providers and providers[0] == "CUDAExecutionProvider":
+        print("\nNote: CUDA is selected for maximum performance.")
+        print("      If you see CUDA errors about missing DLLs, try DirectML instead.\n")
+    
+    print("=" * 60 + "\n")
+    
     det = HaarFaceMesh5pt(
         min_size=(70, 70),
         debug=False,
@@ -453,9 +479,16 @@ def main():
         model_path="models/embedder_arcface.onnx",
         input_size=(112, 112),
         debug=False,
+        providers=providers,
     )
     db = load_db_npz(db_path)
-    matcher = FaceDBMatcher(db=db, dist_thresh=0.34)
+    if not db:
+        print("Warning: Database is empty. Please enroll identities first.")
+        det.close()
+        return
+    
+    # Default threshold 0.40 for better recall (can be adjusted with +/-)
+    matcher = FaceDBMatcher(db=db, dist_thresh=0.40)
     
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -463,7 +496,24 @@ def main():
         det.close()
         return
     
-    print("Recognize (multi-face). q=quit, r=reload DB, +/- threshold, d=debug overlay, l=lock/unlock face")
+    # Set camera resolution (higher = better face detection, GPU can handle it)
+    # Common resolutions: 640x480, 1280x720, 1920x1080
+    # With GPU acceleration, higher resolution improves detection quality
+    # You can adjust these values based on your camera capabilities
+    camera_width = 1280  # Try 1920 for Full HD if your camera supports it
+    camera_height = 720  # Try 1080 for Full HD if your camera supports it
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
+    
+    # Verify actual resolution (camera may not support requested resolution)
+    actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Camera resolution: {actual_width}x{actual_height}")
+    if actual_width != camera_width or actual_height != camera_height:
+        print(f"  (Requested {camera_width}x{camera_height}, camera using {actual_width}x{actual_height})")
+    
+    print(f"\nRecognize (multi-face) - Using {provider_name}")
+    print("Controls: q=quit, r=reload DB, +/- threshold, d=debug overlay, l=lock/unlock face")
     t0 = time.time()
     frames = 0
     fps: Optional[float] = None
@@ -472,8 +522,13 @@ def main():
     # Face locking state
     face_lock: Optional[FaceLock] = None
     lock_target: Optional[str] = None  # Will be set when a face is recognized
-    lock_threshold = 0.34
+    lock_threshold = 0.40  # Match recognition threshold
     max_timeout = 2.0  # seconds before unlocking if face is lost
+    
+    # Temporal smoothing for better accuracy (average recent embeddings per face)
+    # Maps face_id -> list of recent embeddings (max 5)
+    face_embedding_history: Dict[int, List[np.ndarray]] = {}
+    smoothing_window = 5  # Number of frames to average
     
     try:
         while True:
@@ -507,14 +562,35 @@ def main():
                 print(f"[FaceLock] Timeout - Unlocked {face_lock.target_name}")
                 face_lock = None
             
+            # Clean up embedding history for faces that disappeared
+            active_face_ids = set(range(len(faces)))
+            face_embedding_history = {k: v for k, v in face_embedding_history.items() if k in active_face_ids}
+            
             for i, f in enumerate(faces):
                 cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
                 for (x, y) in f.kps.astype(int):
                     cv2.circle(vis, (int(x), int(y)), 2, (0, 255, 0), -1)
                 
-                # align -> embed -> match
+                # align -> embed -> temporal smoothing -> match
                 aligned, _ = align_face_5pt(frame, f.kps, out_size=(112, 112))
-                emb = embedder.embed(aligned)
+                emb_raw = embedder.embed(aligned)
+                
+                # Temporal smoothing: average recent embeddings for this face
+                if i not in face_embedding_history:
+                    face_embedding_history[i] = []
+                face_embedding_history[i].append(emb_raw)
+                if len(face_embedding_history[i]) > smoothing_window:
+                    face_embedding_history[i].pop(0)
+                
+                # Average embeddings and L2-normalize
+                if len(face_embedding_history[i]) > 0:
+                    emb_stack = np.stack(face_embedding_history[i], axis=0)
+                    emb_smooth = emb_stack.mean(axis=0)
+                    emb_smooth = emb_smooth / (np.linalg.norm(emb_smooth) + 1e-12)
+                    emb = emb_smooth.astype(np.float32)
+                else:
+                    emb = emb_raw
+                
                 mr = matcher.match(emb)
                 
                 # Check if this is our locked face

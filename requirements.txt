@@ -2,5 +2,5 @@ numpy
 opencv-python
 tqdm
 mediapipe
-onnxruntime
+onnxruntime-gpu
 scipy

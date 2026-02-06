@@ -43,14 +43,18 @@ class ArcFaceEmbedderONNX:
         model_path: str = "models/embedder_arcface.onnx",
         input_size: Tuple[int, int] = (112, 112),
         debug: bool = False,
+        providers: Optional[List[str]] = None,
     ):
         self.in_w, self.in_h = input_size
         self.debug = debug
-        self.sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+        if providers is None:
+            providers = ["CPUExecutionProvider"]
+        self.sess = ort.InferenceSession(model_path, providers=providers)
         self.in_name = self.sess.get_inputs()[0].name
         self.out_name = self.sess.get_outputs()[0].name
         if debug:
             print("[embed] model loaded")
+            print("[embed] providers:", self.sess.get_providers())
             print("[embed] input:", self.sess.get_inputs()[0].shape)
             print("[embed] output:", self.sess.get_outputs()[0].shape)
     def _preprocess(self, aligned_bgr: np.ndarray) -> np.ndarray:

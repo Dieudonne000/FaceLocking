@@ -22,6 +22,9 @@ A real-time face recognition system with face locking capabilities, designed to 
    ```bash
    pip install -r requirements.txt
    ```
+   
+   **Note for GPU acceleration:** The requirements include `onnxruntime-gpu` for NVIDIA GPU support. If you prefer CPU-only, you can replace it with `onnxruntime` in `requirements.txt`.
+
 2. **Models**:
    Ensure the following models are in the `models/` directory:
    - `embedder_arcface.onnx` (ArcFace recognition)
@@ -40,17 +43,42 @@ python -m src.enroll
   - `s`: Save enrollment to database.
   - `q`: Quit.
 
+**Rebuilding Database from Existing Crops:**
+If you have enrollment crops in `data/enroll/` but the database is missing or outdated, you can rebuild it:
+```bash
+python -m src.rebuild_db
+```
+This scans all person folders in `data/enroll/`, re-embeds their crops, and rebuilds the database. Useful if multiple people were enrolled but only some are in the database.
+
 ### 2. Recognition
 Run real-time multi-face recognition with face locking and action tracking.
 ```bash
 python -m src.recognize
 ```
-- **Controls**:
-  - `+/-`: Adjust distance threshold live.
+
+**Execution Provider Selection:**
+On startup, you'll be prompted to choose CPU or GPU acceleration:
+- **GPU (DirectML)**: **Recommended** - Works with AMD/NVIDIA/Intel GPUs on Windows, no CUDA version conflicts
+- **GPU (CUDA)**: Fastest for NVIDIA GPUs (requires CUDA 12.x - may have version conflicts)
+- **CPU**: Compatible everywhere, slower but more stable
+
+**Note:** If you see CUDA errors about missing DLLs (e.g., `cublasLt64_12.dll`), use DirectML instead. It works with your GPU without CUDA version issues.
+
+**Camera Resolution:**
+With GPU acceleration, the system uses 1280x720 by default (configurable in code). Higher resolution improves face detection quality. The GPU can handle 1920x1080 if your camera supports it.
+
+**Controls**:
+  - `+/-`: Adjust distance threshold live (default: 0.40, lower = stricter).
   - `r`: Reload database from disk.
   - `d`: Toggle debug overlay.
   - `l`: Lock/unlock the currently recognized face.
   - `q`: Quit.
+
+**Accuracy Tips:**
+- The system uses temporal smoothing (averaging recent embeddings) for more stable recognition.
+- If faces aren't recognized, try increasing the threshold with `+` key.
+- If you get false positives, decrease the threshold with `-` key.
+- Default threshold (0.40) balances accuracy and recall - adjust based on your needs.
 
 #### Face Locking Features
 - Lock onto a specific person by pressing `l` when their face is detected
