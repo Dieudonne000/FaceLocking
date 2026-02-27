@@ -4,3 +4,4 @@ tqdm
 mediapipe
 onnxruntime-gpu
 scipy
+paho-mqtt

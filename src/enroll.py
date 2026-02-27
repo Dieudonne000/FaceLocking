@@ -115,6 +115,47 @@ def load_existing_samples_from_crops(
 # -------------------------
 # UI helpers
 # -------------------------
+def _estimate_brightness(img_bgr_112: Optional[np.ndarray]) -> Tuple[float, str]:
+    """
+    Rough brightness estimator for the aligned 112x112 crop.
+    Returns (mean_luma_0_255, qualitative_label).
+    """
+    if img_bgr_112 is None or img_bgr_112.size == 0:
+        return 0.0, "no face"
+    gray = cv2.cvtColor(img_bgr_112, cv2.COLOR_BGR2GRAY)
+    m = float(gray.mean())
+    if m < 30:
+        label = "VERY DARK"
+    elif m < 55:
+        label = "DARK"
+    elif m < 120:
+        label = "OK"
+    else:
+        label = "BRIGHT"
+    return m, label
+
+
+def draw_text_with_shadow(
+    img: np.ndarray,
+    text: str,
+    pos: Tuple[int, int],
+    font_scale: float = 0.7,
+    color: Tuple[int, int, int] = (255, 255, 255),
+    thickness: int = 1,
+    shadow_offset: int = 1,
+    shadow_color: Tuple[int, int, int] = (0, 0, 0),
+    font: int = cv2.FONT_HERSHEY_DUPLEX,
+) -> None:
+    """Draw text with shadow for better readability."""
+    x, y = pos
+    # Draw shadow (lighter shadow for less bold appearance)
+    for dx, dy in [(shadow_offset, shadow_offset), (-shadow_offset, shadow_offset), 
+                   (shadow_offset, -shadow_offset), (-shadow_offset, -shadow_offset)]:
+        cv2.putText(img, text, (x + dx, y + dy), font, font_scale, shadow_color, thickness, cv2.LINE_AA)
+    # Draw main text
+    cv2.putText(img, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
+
+
 def draw_status(
     frame: np.ndarray,
     name: str,
@@ -123,22 +164,45 @@ def draw_status(
     needed: int,
     auto: bool,
     msg: str = "",
+    brightness_label: str = "",
+    brightness_value: float = 0.0,
 ) -> None:
     total = base_count + new_count
     lines = [
-        f"ENROLL: {name}",
+        f"📝 ENROLL: {name}",
         f"Existing: {base_count} | New: {new_count} | Total: {total} / {needed}",
-        f"Auto: {'ON' if auto else 'OFF'} (toggle: a)",
+        f"Auto: {'🟢 ON' if auto else '⚪ OFF'} (toggle: a)",
         "SPACE=capture | s=save | r=reset NEW | q=quit",
     ]
+    if brightness_label:
+        # Color code brightness
+        if brightness_label == "VERY DARK":
+            bright_color = (100, 100, 255)  # Red tint
+        elif brightness_label == "DARK":
+            bright_color = (100, 150, 255)  # Orange tint
+        elif brightness_label == "OK":
+            bright_color = (150, 255, 150)  # Green tint
+        else:
+            bright_color = (200, 255, 200)  # Bright green
+        lines.append(f"💡 Lighting: {brightness_label} (mean={brightness_value:.0f})")
     if msg:
         lines.insert(0, msg)
-    # draw with black shadow for readability
-    y = 30
-    for line in lines:
-        cv2.putText(frame, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(frame, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (255, 255, 255), 2, cv2.LINE_AA)
-        y += 26
+    # draw with modern font and shadow
+    y = 35
+    for i, line in enumerate(lines):
+        # Use different colors for different line types
+        if i == 0 and msg:
+            color = (255, 200, 100)  # Orange for status messages
+        elif "ENROLL" in line:
+            color = (200, 255, 200)  # Light green for header
+        elif "Lighting" in line:
+            color = bright_color if brightness_label else (200, 200, 200)
+        elif "Auto" in line:
+            color = (100, 255, 100) if auto else (200, 200, 200)
+        else:
+            color = (255, 255, 255)  # White for controls
+        draw_text_with_shadow(frame, line, (12, y), 0.7, color, 1, font=cv2.FONT_HERSHEY_DUPLEX)
+        y += 28
 
 # -------------------------
 # Main
@@ -167,7 +231,7 @@ def main():
     
     auto = False
     last_auto = 0.0
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     if not cap.isOpened():
         raise RuntimeError("Failed to open camera.")
     
@@ -185,6 +249,9 @@ def main():
     frames = 0
     fps: Optional[float] = None
     
+    # Simple heuristic: avoid auto-capturing when lighting is extremely dark.
+    # Manual capture is still allowed, but UI will warn about low light.
+    min_auto_brightness = 35.0
     try:
         while True:
             ok, frame = cap.read()
@@ -194,6 +261,8 @@ def main():
             vis = frame.copy()
             faces = det.detect(frame, max_faces=1)
             aligned: Optional[np.ndarray] = None
+            brightness_value = 0.0
+            brightness_label = ""
             
             if faces:
                 f = faces[0]
@@ -202,6 +271,7 @@ def main():
                 for (x, y) in f.kps.astype(int):
                     cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
                 aligned, _ = align_face_5pt(frame, f.kps, out_size=(112, 112))
+                brightness_value, brightness_label = _estimate_brightness(aligned)
                 cv2.imshow(cfg.window_aligned, aligned)
             else:
                 cv2.imshow(cfg.window_aligned, np.zeros((112, 112, 3), dtype=np.uint8))
@@ -209,13 +279,17 @@ def main():
             # auto capture
             now = time.time()
             if auto and aligned is not None and (now - last_auto) >= cfg.auto_capture_every_s:
-                r = emb.embed(aligned)
-                new_samples.append(r.embedding)
-                last_auto = now
-                status_msg = f"Auto captured NEW ({len(new_samples)})"
-                if cfg.save_crops:
-                    fn = person_dir / f"{int(now * 1000)}.jpg"
-                    cv2.imwrite(str(fn), aligned)
+                # Skip auto-capture in extremely dark conditions to avoid noisy templates.
+                if brightness_label in ("VERY DARK", "DARK"):
+                    status_msg = f"Lighting too low for auto-capture ({brightness_label})."
+                else:
+                    r = emb.embed(aligned)
+                    new_samples.append(r.embedding)
+                    last_auto = now
+                    status_msg = f"Auto captured NEW ({len(new_samples)})"
+                    if cfg.save_crops:
+                        fn = person_dir / f"{int(now * 1000)}.jpg"
+                        cv2.imwrite(str(fn), aligned)
             
             # FPS
             frames += 1
@@ -226,8 +300,8 @@ def main():
                 t0 = time.time()
             
             if fps is not None:
-                cv2.putText(vis, f"FPS: {fps:.1f}", (10, vis.shape[0] - 12),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+                draw_text_with_shadow(vis, f"FPS: {fps:.1f}", (12, vis.shape[0] - 15),
+                                    0.75, (150, 255, 150), 1, font=cv2.FONT_HERSHEY_DUPLEX)
             
             draw_status(
                 vis,
@@ -237,6 +311,8 @@ def main():
                 needed=cfg.samples_needed,
                 auto=auto,
                 msg=status_msg,
+                brightness_label=brightness_label,
+                brightness_value=brightness_value,
             )
             
             cv2.imshow(cfg.window_main, vis)
@@ -254,9 +330,13 @@ def main():
                 if aligned is None:
                     status_msg = "No face detected. Not captured."
                 else:
+                    # Allow manual capture even in darker conditions but warn the user.
+                    if brightness_label in ("VERY DARK", "DARK"):
+                        status_msg = f"Captured NEW in low light ({brightness_label}). Consider adding brighter samples."
+                    else:
+                        status_msg = f"Captured NEW ({len(new_samples) + 1})"
                     r = emb.embed(aligned)
                     new_samples.append(r.embedding)
-                    status_msg = f"Captured NEW ({len(new_samples)})"
                     if cfg.save_crops:
                         fn = person_dir / f"{int(time.time() * 1000)}.jpg"
                         cv2.imwrite(str(fn), aligned)

@@ -4,7 +4,7 @@ Multi-face recognition (CPU-friendly) using your now-stable pipeline:
 Haar (multi-face) -> FaceMesh 5pt (per-face ROI) -> align_face_5pt (112x112)
 -> ArcFace ONNX embedding -> cosine distance to DB -> label each face.
 Run:
-python -m src.recognize
+python addons/mqtt_servo_tracking/recognize_mqtt.py
 Keys:
 q : quit
 r : reload DB from disk (data/db/face_db.npz)
@@ -18,9 +18,10 @@ Notes:
 Since embeddings are L2-normalized, cosine_similarity = dot(a,b).
 """
 from __future__ import annotations
+import argparse
 import time
-import json
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -29,6 +30,10 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import onnxruntime as ort
+try:
+    import paho.mqtt.client as mqtt
+except Exception:
+    mqtt = None
 
 try:
     import mediapipe as mp
@@ -39,8 +44,12 @@ except Exception as e:
     _MP_IMPORT_ERROR = e
 
 # Reuse your known-good alignment method
-from .haar_5pt import align_face_5pt
-from .onnx_providers import select_provider_interactive, get_provider_display_name
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.haar_5pt import align_face_5pt
+from src.onnx_providers import select_provider_interactive, get_provider_display_name
 
 # -------------------------
 # Data
@@ -508,6 +517,167 @@ def draw_text_box(
     return (text_width + padding * 2, text_height + padding * 2 + baseline)
 
 # -------------------------
+# MQTT movement control
+# -------------------------
+MOVEMENT_LEFT = "LEFT"
+MOVEMENT_RIGHT = "RIGHT"
+MOVEMENT_CENTER = "CENTER"
+MOVEMENT_SEARCH = "SEARCH"
+MOVEMENT_IDLE = "IDLE"
+
+
+def compute_face_error_x(kps: np.ndarray, frame_width: int) -> float:
+    face_center_x = float(np.mean(kps[:, 0]))
+    return face_center_x - (float(frame_width) / 2.0)
+
+
+def command_from_error_with_hysteresis(
+    error_x: float,
+    deadzone_px: float,
+    center_exit_hysteresis_px: float,
+    previous_command: str,
+) -> str:
+    # Wider threshold when leaving CENTER prevents LEFT/RIGHT oscillation around center.
+    if previous_command == MOVEMENT_CENTER:
+        if abs(error_x) <= (float(deadzone_px) + float(center_exit_hysteresis_px)):
+            return MOVEMENT_CENTER
+
+    if abs(error_x) <= float(deadzone_px):
+        return MOVEMENT_CENTER
+    if error_x < 0:
+        return MOVEMENT_LEFT
+    return MOVEMENT_RIGHT
+
+
+class MqttMovementPublisher:
+    def __init__(
+        self,
+        broker_host: str,
+        broker_port: int,
+        topic: str,
+        client_id: str,
+        min_publish_interval: float = 0.15,
+    ):
+        self.topic = topic
+        self.min_publish_interval = float(max(0.0, min_publish_interval))
+        self.last_command: Optional[str] = None
+        self.last_publish_at = 0.0
+        self.connected = False
+
+        if mqtt is None:
+            raise RuntimeError("paho-mqtt is not installed. Add it to requirements and run pip install -r requirements.txt")
+
+        self.client = mqtt.Client(client_id=client_id, clean_session=True, protocol=mqtt.MQTTv311)
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        self.client.reconnect_delay_set(min_delay=1, max_delay=5)
+        self.client.connect_async(broker_host, int(broker_port), keepalive=30)
+        self.client.loop_start()
+
+    def _on_connect(self, _client, _userdata, _flags, rc, _properties=None):
+        self.connected = (rc == 0)
+        if self.connected:
+            print(f"[MQTT] Connected to broker, publishing on topic '{self.topic}'")
+        else:
+            print(f"[MQTT] Connect failed with code {rc}")
+
+    def _on_disconnect(self, _client, _userdata, *args):
+        # paho-mqtt V1 passes: (rc)
+        # paho-mqtt V2 passes: (disconnect_flags, reason_code, properties)
+        rc = 0
+        if len(args) == 1:
+            rc = int(args[0])
+        elif len(args) >= 2:
+            rc = int(args[1])
+
+        self.connected = False
+        if rc != 0:
+            print(f"[MQTT] Unexpected disconnect (rc={rc}), retrying...")
+
+    def publish(self, command: str, force: bool = False):
+        now = time.time()
+        if (
+            not force
+            and command == self.last_command
+            and (now - self.last_publish_at) < self.min_publish_interval
+        ):
+            return
+        if not self.connected:
+            return
+
+        info = self.client.publish(self.topic, payload=command, qos=0, retain=False)
+        if info.rc == mqtt.MQTT_ERR_SUCCESS:
+            self.last_command = command
+            self.last_publish_at = now
+
+    def close(self):
+        try:
+            self.client.loop_stop()
+            self.client.disconnect()
+        except Exception:
+            pass
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Face lock tracking with MQTT direction publishing for ESP8266 servo control.",
+    )
+    parser.add_argument("--mqtt-broker", default="157.173.101.159", help="MQTT broker host/IP.")
+    parser.add_argument("--mqtt-port", type=int, default=1883, help="MQTT broker port.")
+    parser.add_argument(
+        "--mqtt-topic",
+        default="vision/teamalpha/movement",
+        help="MQTT topic to publish movement commands.",
+    )
+    parser.add_argument(
+        "--mqtt-client-id",
+        default=f"face-lock-{int(time.time())}",
+        help="MQTT client id.",
+    )
+    parser.add_argument(
+        "--deadzone-px",
+        type=float,
+        default=80.0,
+        help="Horizontal pixel deadzone around frame center for CENTER command.",
+    )
+    parser.add_argument(
+        "--center-exit-hysteresis-px",
+        type=float,
+        default=30.0,
+        help="Extra pixels required to leave CENTER and start LEFT/RIGHT movement.",
+    )
+    parser.add_argument(
+        "--error-smooth-alpha",
+        type=float,
+        default=0.35,
+        help="EMA smoothing factor for horizontal error (0..1). Lower = smoother.",
+    )
+    parser.add_argument(
+        "--command-confirm-frames",
+        type=int,
+        default=2,
+        help="How many consecutive frames are needed before changing LEFT/RIGHT/CENTER.",
+    )
+    parser.add_argument(
+        "--search-delay-sec",
+        type=float,
+        default=0.8,
+        help="Delay before sending SEARCH after the locked face is temporarily lost.",
+    )
+    parser.add_argument(
+        "--mqtt-min-interval",
+        type=float,
+        default=0.15,
+        help="Minimum seconds between repeated identical MQTT commands.",
+    )
+    parser.add_argument(
+        "--disable-mqtt",
+        action="store_true",
+        help="Run face lock tracking without MQTT publishing.",
+    )
+    return parser.parse_args()
+
+# -------------------------
 # Demo
 # -------------------------
 def save_action_history(face_name: str, actions: List[Action]):
@@ -524,6 +694,11 @@ def save_action_history(face_name: str, actions: List[Action]):
             f.write(f"{time_str} - {action.type.name}: {action.details}\n")
 
 def main():
+    args = parse_args()
+    args.error_smooth_alpha = float(max(0.01, min(1.0, args.error_smooth_alpha)))
+    args.command_confirm_frames = int(max(1, args.command_confirm_frames))
+    args.search_delay_sec = float(max(0.0, args.search_delay_sec))
+    args.center_exit_hysteresis_px = float(max(0.0, args.center_exit_hysteresis_px))
     db_path = Path("data/db/face_db.npz")
     os.makedirs("logs", exist_ok=True)
     
@@ -558,7 +733,7 @@ def main():
     # Default threshold 0.40 for better recall (can be adjusted with +/-)
     matcher = FaceDBMatcher(db=db, dist_thresh=0.40)
     
-    cap = cv2.VideoCapture(1)
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Camera not available")
         det.close()
@@ -583,16 +758,45 @@ def main():
     print(f"\nRecognize (multi-face) - Using {provider_name}")
     print("Controls: q=quit, r=reload DB, +/- threshold, d=debug overlay")
     print("          LEFT/RIGHT arrows (or a/f keys) to select face, l=lock/unlock selected face")
+    print(
+        f"MQTT movement topic: {args.mqtt_topic} @ {args.mqtt_broker}:{args.mqtt_port}"
+        if not args.disable_mqtt
+        else "MQTT movement publishing disabled"
+    )
     t0 = time.time()
     frames = 0
     fps: Optional[float] = None
     show_debug = False
+    movement_command = MOVEMENT_IDLE
+    movement_error_x = 0.0
+    filtered_error_x: Optional[float] = None
+    stable_track_command = MOVEMENT_CENTER
+    pending_track_command: Optional[str] = None
+    pending_track_count = 0
+    face_missing_since: Optional[float] = None
+    mqtt_publisher: Optional[MqttMovementPublisher] = None
+
+    if args.disable_mqtt:
+        print("[MQTT] Disabled by flag (--disable-mqtt)")
+    elif mqtt is None:
+        print("[MQTT] paho-mqtt is not installed. Movement commands will not be published.")
+    else:
+        try:
+            mqtt_publisher = MqttMovementPublisher(
+                broker_host=args.mqtt_broker,
+                broker_port=args.mqtt_port,
+                topic=args.mqtt_topic,
+                client_id=args.mqtt_client_id,
+                min_publish_interval=args.mqtt_min_interval,
+            )
+            mqtt_publisher.publish(MOVEMENT_IDLE, force=True)
+        except Exception as e:
+            print(f"[MQTT] Failed to initialize publisher: {e}")
+            mqtt_publisher = None
     
     # Face locking state
     face_lock: Optional[FaceLock] = None
-    lock_target: Optional[str] = None  # Will be set when a face is recognized
-    lock_threshold = 0.40  # Match recognition threshold
-    max_timeout = 10.0  # seconds before unlocking if face is lost
+    max_timeout = 40.0  # seconds before unlocking if face is lost
     
     # Face selection for locking (when multiple faces present)
     selected_face_index: Optional[int] = None  # Index of currently selected face (None = auto-select first)
@@ -641,6 +845,13 @@ def main():
                 face_lock = None
                 selected_face_index = None
                 potential_face_to_lock = None
+                filtered_error_x = None
+                stable_track_command = MOVEMENT_CENTER
+                pending_track_command = None
+                pending_track_count = 0
+                face_missing_since = None
+                if mqtt_publisher is not None:
+                    mqtt_publisher.publish(MOVEMENT_IDLE, force=True)
             
             # Clean up embedding / label history for faces that disappeared
             active_face_ids = set(range(len(faces)))
@@ -651,6 +862,9 @@ def main():
             if selected_face_index is not None and selected_face_index >= len(faces):
                 selected_face_index = None
                 potential_face_to_lock = None
+
+            locked_face_found = False
+            locked_face_kps: Optional[np.ndarray] = None
             
             for i, f in enumerate(faces):
                 cv2.rectangle(vis, (f.x1, f.y1), (f.x2, f.y2), (0, 255, 0), 2)
@@ -715,6 +929,8 @@ def main():
                     for action in actions:
                         print(f"[Action] {action.type.name}: {action.details}")
                     is_locked_face = True
+                    locked_face_found = True
+                    locked_face_kps = f.kps.copy()
                 
                 # label (use smoothed/stable label for display to reduce flicker)
                 label = stable_label
@@ -782,6 +998,62 @@ def main():
                 if show_debug:
                     dbg = f"kpsLeye=({f.kps[0,0]:.0f},{f.kps[0,1]:.0f})"
                     draw_text_with_shadow(vis, dbg, (10, h - 20), 0.65, (255, 255, 255), 1, font=cv2.FONT_HERSHEY_DUPLEX)
+
+            # Movement command for ESP servo
+            if face_lock and locked_face_found and locked_face_kps is not None:
+                face_missing_since = None
+                raw_error_x = compute_face_error_x(locked_face_kps, frame_width=w)
+                if filtered_error_x is None:
+                    filtered_error_x = raw_error_x
+                else:
+                    filtered_error_x = (
+                        args.error_smooth_alpha * raw_error_x
+                        + (1.0 - args.error_smooth_alpha) * filtered_error_x
+                    )
+                movement_error_x = float(filtered_error_x)
+
+                desired_track_command = command_from_error_with_hysteresis(
+                    error_x=movement_error_x,
+                    deadzone_px=args.deadzone_px,
+                    center_exit_hysteresis_px=args.center_exit_hysteresis_px,
+                    previous_command=stable_track_command,
+                )
+
+                if desired_track_command == stable_track_command:
+                    pending_track_command = None
+                    pending_track_count = 0
+                else:
+                    if pending_track_command == desired_track_command:
+                        pending_track_count += 1
+                    else:
+                        pending_track_command = desired_track_command
+                        pending_track_count = 1
+                    if pending_track_count >= args.command_confirm_frames:
+                        stable_track_command = desired_track_command
+                        pending_track_command = None
+                        pending_track_count = 0
+
+                movement_command = stable_track_command
+            elif face_lock:
+                if face_missing_since is None:
+                    face_missing_since = current_time
+                lost_for = current_time - face_missing_since
+                if lost_for < args.search_delay_sec:
+                    movement_command = MOVEMENT_CENTER
+                else:
+                    movement_command = MOVEMENT_SEARCH
+                movement_error_x = 0.0
+            else:
+                filtered_error_x = None
+                stable_track_command = MOVEMENT_CENTER
+                pending_track_command = None
+                pending_track_count = 0
+                face_missing_since = None
+                movement_command = MOVEMENT_IDLE
+                movement_error_x = 0.0
+
+            if mqtt_publisher is not None:
+                mqtt_publisher.publish(movement_command)
             
             # Draw UI elements with proper spacing and modern styling
             y_offset = 35
@@ -792,6 +1064,12 @@ def main():
                 header += f" | FPS: {fps:.1f}"
             draw_text_box(vis, header, (12, y_offset), 0.75, (200, 255, 200), (20, 20, 20), 0.75, 6, cv2.FONT_HERSHEY_DUPLEX)
             y_offset += 40
+
+            movement_text = f"MQTT movement: {movement_command}"
+            if movement_command in (MOVEMENT_LEFT, MOVEMENT_RIGHT, MOVEMENT_CENTER):
+                movement_text += f" (err_x={movement_error_x:+.1f}px)"
+            draw_text_with_shadow(vis, movement_text, (12, y_offset), 0.62, (180, 220, 255), 1, font=cv2.FONT_HERSHEY_DUPLEX)
+            y_offset += 28
             
             # Lock status with enhanced styling
             if face_lock:
@@ -868,6 +1146,13 @@ def main():
                     face_lock = None
                     selected_face_index = None
                     potential_face_to_lock = None
+                    filtered_error_x = None
+                    stable_track_command = MOVEMENT_CENTER
+                    pending_track_command = None
+                    pending_track_count = 0
+                    face_missing_since = None
+                    if mqtt_publisher is not None:
+                        mqtt_publisher.publish(MOVEMENT_IDLE, force=True)
                 # Only allow locking if we have a selected recognized face
                 elif potential_face_to_lock and potential_face_to_lock[0] is not None:
                     name, emb, kps = potential_face_to_lock
@@ -882,11 +1167,19 @@ def main():
                         current_time,
                         f"Face locked: {name}"
                     ))
+                    filtered_error_x = None
+                    stable_track_command = MOVEMENT_CENTER
+                    pending_track_command = None
+                    pending_track_count = 0
+                    face_missing_since = None
                     print(f"[FaceLock] Locked onto {name} (face {selected_face_index + 1 if selected_face_index is not None else '?'})")
                     # Keep selection for visual feedback, but locking is done
             
             cv2.imshow("Face Recognition - Press 'q' to quit", vis)
     finally:
+        if mqtt_publisher is not None:
+            mqtt_publisher.publish(MOVEMENT_IDLE, force=True)
+            mqtt_publisher.close()
         det.close()
         cap.release()
         cv2.destroyAllWindows()

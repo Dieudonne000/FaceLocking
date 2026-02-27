@@ -149,3 +149,19 @@ python -m src.haar_5pt  # Detection and landmark visualization
 - **Face Recognition**: Uses ArcFace for generating unique face embeddings
 - **Landmark Tracking**: MediaPipe FaceMesh tracks 5 key facial points
 - **Performance**: Optimized for real-time processing on CPU
+
+## MQTT + ESP8266 Servo Extension
+
+A separate extension was added in [`addons/mqtt_servo_tracking`](addons/mqtt_servo_tracking) so the original `src/recognize.py` stays unchanged.
+
+- Python app: `addons/mqtt_servo_tracking/recognize_mqtt.py`
+- Broker: `157.173.101.159`
+- Topic: `vision/teamalpha/movement`
+- Commands: `LEFT`, `RIGHT`, `CENTER`, `SEARCH`, `IDLE`
+- ESP8266 firmware: `addons/mqtt_servo_tracking/esp8266/face_tracker_servo/face_tracker_servo.ino`
+- Upload helper: `addons/mqtt_servo_tracking/esp8266/upload.ps1`
+
+Run:
+```bash
+python addons/mqtt_servo_tracking/recognize_mqtt.py
+```
