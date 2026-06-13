@@ -28,7 +28,7 @@ Ports:
 Movement topic:
 
 ```text
-vision/Dieudonne/ne/movement
+vision/name/ne/movement
 ```
 
 Movement payloads:
@@ -44,7 +44,7 @@ The firmware also accepts `HOME` for manual recentering; the Python tracker does
 Dashboard status topic:
 
 ```text
-vision/Dieudonne/ne/status
+vision/name/ne/status
 ```
 
 Status payload shape:
@@ -56,7 +56,7 @@ Status payload shape:
   "error_x": -124.5,
   "raw_error_x": -138.2,
   "locked": true,
-  "target": "Dieudonne",
+  "target": "name",
   "locked_face_found": true,
   "faces": 1,
   "confidence": 0.8231,
@@ -94,7 +94,7 @@ python addons/mqtt_servo_tracking/recognize_mqtt.py
 Optional flags:
 
 ```bash
-python addons/mqtt_servo_tracking/recognize_mqtt.py --target-name Dieudonne --mqtt-broker broker.hivemq.com --mqtt-port 1883 --mqtt-topic vision/Dieudonne/ne/movement --mqtt-status-topic vision/Dieudonne/ne/status --camera-width 960 --camera-height 540 --max-faces 5 --locked-max-faces 5 --detect-every 2 --recognize-every 3 --landmark-roi-width 224 --deadzone-px 70 --center-zone-ratio 0.36 --center-exit-hysteresis-px 45 --error-smooth-alpha 0.35 --command-hold-sec 0.25 --scan-delay-sec 0.8 --reacquire-hold-sec 0.30 --command-confirm-frames 2 --mqtt-min-interval 0.15 --mqtt-status-min-interval 0.25
+python addons/mqtt_servo_tracking/recognize_mqtt.py --target-name name --mqtt-broker broker.hivemq.com --mqtt-port 1883 --mqtt-topic vision/name/ne/movement --mqtt-status-topic vision/name/ne/status --camera-width 960 --camera-height 540 --max-faces 5 --locked-max-faces 5 --detect-every 2 --recognize-every 3 --landmark-roi-width 224 --deadzone-px 70 --center-zone-ratio 0.36 --center-exit-hysteresis-px 45 --error-smooth-alpha 0.35 --command-hold-sec 0.25 --scan-delay-sec 0.8 --reacquire-hold-sec 0.30 --command-confirm-frames 2 --mqtt-min-interval 0.15 --mqtt-status-min-interval 0.25
 ```
 
 Use `--disable-mqtt` to run the recognizer without publishing MQTT messages. Structured evidence logs are enabled by default and are written to `logs/evidence/`.
@@ -166,7 +166,7 @@ The dashboard uses status JSON as the authoritative display state. Raw movement 
    ```cpp
    const char* MQTT_SERVER = "broker.hivemq.com";
    const uint16_t MQTT_PORT = 1883;
-   const char* MQTT_TOPIC = "vision/Dieudonne/ne/movement";
+   const char* MQTT_TOPIC = "vision/name/ne/movement";
    ```
 
 4. Tune the servo constants:
