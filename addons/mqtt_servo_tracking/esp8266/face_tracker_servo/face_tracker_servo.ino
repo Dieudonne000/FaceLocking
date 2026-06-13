@@ -10,8 +10,8 @@ const char* WIFI_PASSWORD = "123456789q";
 // MQTT settings
 const char* MQTT_SERVER = "broker.hivemq.com";
 const uint16_t MQTT_PORT = 1883;
-const char* MQTT_TOPIC = "vision/Dieudonne/ne/movement";
-const char* MQTT_CLIENT_ID_PREFIX = "dieudonne";
+const char* MQTT_TOPIC = "vision/name/ne/movement";
+const char* MQTT_CLIENT_ID_PREFIX = "name";
 const IPAddress MQTT_FALLBACK_IPS[] = {
   IPAddress(3, 126, 147, 153),
   IPAddress(3, 124, 122, 176),
@@ -272,7 +272,7 @@ void handleServo() {
 void setup() {
   Serial.begin(115200);
   delay(10);
-  Serial.println("\n[SYS] Team Alpha Face-Servo Initializing...");
+  Serial.println("\n[SYS] team Face-Servo Initializing...");
   mqttClientId = String(MQTT_CLIENT_ID_PREFIX) + "-" + String(ESP.getChipId(), HEX);
   Serial.print("[MQTT] Client ID: ");
   Serial.println(mqttClientId);
