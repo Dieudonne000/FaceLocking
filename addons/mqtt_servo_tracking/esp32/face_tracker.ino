@@ -12,8 +12,8 @@ const char* WIFI_PASSWORD = "";
 const char* MQTT_SERVER = "broker.hivemq.com";
 const uint16_t MQTT_PORT = 1883;
 
-const char* MQTT_TOPIC = "vision/Dieudonne/ne/movement";
-const char* MQTT_CLIENT_ID_PREFIX = "teamalpha-face-servo";
+const char* MQTT_TOPIC = "vision/name/ne/movement";
+const char* MQTT_CLIENT_ID_PREFIX = "face-servo";
 const IPAddress MQTT_FALLBACK_IPS[] = {
   IPAddress(3, 126, 147, 153),
   IPAddress(3, 124, 122, 176),
